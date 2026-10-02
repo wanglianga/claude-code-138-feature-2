@@ -3,7 +3,7 @@ import type { TimelineEvent } from '@/types'
 
 defineProps<{ events: TimelineEvent[] }>()
 
-const DANGER = new Set(['complaint', 'hall_congestion', 'device_broken', 'child_lost', 'maintenance', 'late', 'reject'])
+const DANGER = new Set(['complaint', 'hall_congestion', 'device_broken', 'device_lost_report', 'deposit_withhold', 'child_lost', 'maintenance', 'late', 'reject'])
 const OK = new Set(['complete', 'confirm', 'arrive', 'start_tour', 'batch_admit'])
 </script>
 

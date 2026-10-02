@@ -62,6 +62,15 @@ function submitReply() {
 }
 
 const deviceRows = computed(() => r.value?.devices ?? [])
+const lostRecords = computed(() => r.value?.lostDevices ?? [])
+
+const lostOutcomeText: Record<string, string> = {
+  pending: '待保洁查找 / 现场寻找中',
+  refund: '保洁找回 · 设备完好 · 押金全退',
+  repair: '保洁找回 · 设备损坏 · 已扣维修费',
+  forfeit: '已赔付 / 确认无法找回 · 押金不退',
+}
+const hallName = (id: string) => museum.hallById(id)?.name ?? id
 </script>
 
 <template>
@@ -185,8 +194,8 @@ const deviceRows = computed(() => r.value?.devices ?? [])
                   <td class="small mono">{{ d.lentAt?.slice(11, 16) }}</td>
                   <td class="small mono">{{ d.returnedAt?.slice(11, 16) ?? '—' }}</td>
                   <td class="small">
-                    <span class="tag" :class="{ 'tag-ok': d.status === 'returned', 'tag-maint': d.status === 'damaged' || d.status === 'lost', 'tag-warn': d.status === 'lent' }">
-                      {{ { available: '在库', lent: '借出中', returned: '完好归还', damaged: '损坏', lost: '遗失' }[d.status] }}
+                    <span class="tag" :class="{ 'tag-ok': d.status === 'returned', 'tag-maint': d.status === 'damaged' || d.status === 'lost' || d.status === 'repairing', 'tag-warn': d.status === 'lent' }">
+                      {{ { available: '在库', lent: '借出中', returned: '完好归还', damaged: '损坏', lost: '遗失', repairing: '维修中（找回损坏）' }[d.status] }}
                     </span>
                     <div v-if="d.note" class="muted">{{ d.note }}</div>
                   </td>
@@ -195,10 +204,41 @@ const deviceRows = computed(() => r.value?.devices ?? [])
               </tbody>
             </table>
             <dl class="kv" style="margin-top:10px">
-              <dt>押金合计</dt><dd class="money">¥{{ r.depositTotal.toLocaleString() }}</dd>
+              <dt>押金合计（¥{{ r.depositPerUnit }}/台）</dt><dd class="money">¥{{ r.depositTotal.toLocaleString() }}</dd>
               <dt>扣款</dt><dd class="money">¥{{ r.depositDeduction }}</dd>
               <dt>实退</dt><dd class="money">¥{{ (r.depositTotal - r.depositDeduction).toLocaleString() }}</dd>
             </dl>
+          </div>
+
+          <div v-if="lostRecords.length" class="card">
+            <div class="card-title">
+              耳麦遗失与押金处置档案
+              <span class="aside">{{ lostRecords.length }} 台缺失</span>
+            </div>
+            <table class="data">
+              <thead><tr><th>编号</th><th>借出人 / 负责人</th><th>最后展厅</th><th>处置与结论</th></tr></thead>
+              <tbody>
+                <tr v-for="l in lostRecords" :key="l.key">
+                  <td class="mono small"><strong>{{ l.code }}</strong>
+                    <div class="small muted">{{ l.reportedAt?.slice(11, 16) }} 登记</div>
+                  </td>
+                  <td class="small">{{ l.borrower }}<div class="muted">{{ l.leader }}</div></td>
+                  <td class="small">{{ hallName(l.lastHallId) }}</td>
+                  <td class="small">
+                    <span class="tag" :class="l.outcome === 'refund' ? 'tag-ok' : l.outcome === 'pending' ? 'tag-warn' : 'tag-maint'">
+                      {{ lostOutcomeText[l.outcome] }}
+                    </span>
+                    <div class="muted" style="margin-top:2px">
+                      暂扣 ¥{{ l.withheldAmount }}
+                      <template v-if="l.outcome === 'repair'"> · 扣维修费 ¥{{ l.repairFee }}，退 ¥{{ l.withheldAmount - (l.repairFee ?? 0) }}</template>
+                      <template v-if="l.outcome === 'refund'"> · 全额退还</template>
+                    </div>
+                    <div v-if="l.foundAt" class="muted">找回 {{ l.foundAt.slice(11, 16) }}<template v-if="l.foundBy"> · {{ l.foundBy }}</template></div>
+                    <div v-if="l.note" class="muted">{{ l.note }}</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

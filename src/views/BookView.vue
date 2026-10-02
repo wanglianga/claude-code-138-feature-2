@@ -3,6 +3,7 @@ import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMuseumStore } from '@/stores/museum'
 import { useReservationsStore } from '@/stores/reservations'
+import { resolveDepositRate } from '@/lib/deposit'
 import { buildRoute } from '@/lib/schedule'
 import {
   AGE_LABEL,
@@ -40,6 +41,10 @@ const errors = reactive<Record<string, string>>({})
 const createdId = ref<string | null>(null)
 
 const theme = computed(() => museum.themeById(form.themeId))
+/** 该单位历史遗失记录决定押金费率（旅行社加收规则） */
+const depositRate = computed(() =>
+  resolveDepositRate(form.orgType, form.orgName.trim(), reservations.list, `${form.arriveDate}T${form.arriveTime}:00`),
+)
 const previewRoute = computed(() =>
   buildRoute(theme.value!, museum.halls, form.arriveTime, {
     accessible: form.accessible,
@@ -195,13 +200,14 @@ function goConfirm() {
       <div class="field">
         <label class="checkbox">
           <input v-model="form.needHeadsets" type="checkbox" />
-          🎧 借用团队讲解耳麦（押金 ¥{{ museum.depositPerUnit }}/台，离馆无损退还）
+          🎧 借用团队讲解耳麦（押金 ¥{{ depositRate.perUnit }}/台，离馆无损退还）
         </label>
+        <span v-if="depositRate.risk" class="hint" style="color:var(--red)">⚠ {{ depositRate.reason }}</span>
       </div>
       <div v-if="form.needHeadsets" class="field" style="max-width: 220px">
         <label>借用数量</label>
         <input v-model.number="form.headsetCount" type="number" min="1" :max="form.groupSize" />
-        <span class="hint">预计押金 ¥{{ (form.headsetCount * museum.depositPerUnit).toLocaleString() }}</span>
+        <span class="hint">预计押金 ¥{{ (form.headsetCount * depositRate.perUnit).toLocaleString() }}</span>
         <span v-if="errors.headsetCount" class="field-error">{{ errors.headsetCount }}</span>
       </div>
 

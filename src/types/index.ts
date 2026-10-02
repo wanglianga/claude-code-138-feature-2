@@ -65,6 +65,9 @@ export type EventKind =
   | 'headcount'
   | 'device_handout'
   | 'device_exchange'
+  | 'device_lost_report'
+  | 'deposit_withhold'
+  | 'device_found'
   | 'guide_assign'
   | 'guide_swap'
   | 'batch_admit'
@@ -92,7 +95,13 @@ export interface TimelineEvent {
   by: string // 操作人/系统
 }
 
-export type DeviceStatus = 'available' | 'lent' | 'returned' | 'damaged' | 'lost'
+export type DeviceStatus =
+  | 'available' // 在库可借
+  | 'lent' // 借出中
+  | 'returned' // 已完好归还
+  | 'damaged' // 损坏（已判赔/待赔）
+  | 'lost' // 遗失（保洁未找回）
+  | 'repairing' // 保洁找回但需维修，暂不可再借出
 
 export const DEVICE_STATUS_LABEL: Record<DeviceStatus, string> = {
   available: '在库',
@@ -100,12 +109,51 @@ export const DEVICE_STATUS_LABEL: Record<DeviceStatus, string> = {
   returned: '已归还',
   damaged: '损坏',
   lost: '遗失',
+  repairing: '维修中',
+}
+
+/** 离馆清点时的耳麦遗失登记与押金处置 */
+export type LostResolution =
+  | 'searching' // 团队选择现场寻找，暂不结算该台
+  | 'withheld' // 押金暂扣，等待保洁查找结果
+  | 'paid' // 团队直接赔付，押金按遗失扣款
+
+/** 保洁找回设备后的核验结论 */
+export type FoundOutcome = 'intact' | 'repair'
+
+export interface LostDeviceRecord {
+  /** 登记序号，用于操作定位 */
+  key: string
+  code: string
+  /** 借出人（耳麦实际使用/归还责任人，如团员姓名） */
+  borrower: string
+  /** 团队负责人（领队/带队老师） */
+  leader: string
+  /** 最后使用展厅 */
+  lastHallId: string
+  note?: string
+  reportedAt: string
+  /** 团队当场选择的处置方式 */
+  resolution: LostResolution
+  /** 暂扣押金金额（按该团单台押金费率） */
+  withheldAmount: number
+  paidAt?: string
+  /** 保洁找回时间 */
+  foundAt?: string
+  /** 找回时设备核验结论：完好 / 需维修 */
+  foundOutcome?: FoundOutcome
+  /** 找回需维修时扣除的维修费 */
+  repairFee?: number
+  foundBy?: string
+  resolvedAt?: string
+  /** 最终结论：pending 待保洁结果 / refund 全额退押金 / repair 扣维修费退余额 / forfeit 押金不退（赔付或确认无法找回） */
+  outcome: 'pending' | 'refund' | 'repair' | 'forfeit'
 }
 
 export interface DeviceUnit {
   code: string
   status: DeviceStatus
-  deposit: number // 单台押金
+  deposit: number // 单台押金（该团实际收取费率，可能为加收费率）
   resId?: string // 当前借出预约
   lentAt?: string
   returnedAt?: string
@@ -150,8 +198,12 @@ export interface Reservation {
 
   // —— 设备与押金 ——
   devices: DeviceUnit[]
+  /** 本团实际执行的单台押金费率（受该旅行社历史遗失记录影响可能加收） */
+  depositPerUnit: number
   depositTotal: number
   depositDeduction: number
+  /** 离馆清点时登记的遗失耳麦及其押金处置/保洁找回结论 */
+  lostDevices: LostDeviceRecord[]
 
   // —— 离馆 ——
   departAt?: string

@@ -52,6 +52,17 @@ function admit() {
 }
 
 const availableStock = computed(() => museum.inventory.available)
+/** 该团当前适用的耳麦押金费率（旅行社会随历史遗失记录加收）；发放后以预约记录上的实收费率为准 */
+const depositPerUnit = computed(() =>
+  r.value?.devices.length
+    ? r.value.depositPerUnit
+    : (r.value ? store.depositRateFor(r.value.orgType, r.value.orgName).perUnit : museum.depositPerUnit),
+)
+const depositRisk = computed(() =>
+  r.value && !r.value.devices.length
+    ? store.depositRateFor(r.value.orgType, r.value.orgName)
+    : null,
+)
 </script>
 
 <template>
@@ -128,9 +139,12 @@ const availableStock = computed(() => museum.inventory.available)
           <div class="card-title">③ 发放耳麦</div>
           <template v-if="r.needHeadsets">
             <div class="field">
-              <label>发放数量（押金 ¥{{ museum.depositPerUnit }}/台）</label>
+              <label>发放数量（押金 ¥{{ depositPerUnit }}/台）</label>
               <input v-model.number="headsetCount" type="number" :min="0" :max="r.verifiedSize ?? r.groupSize" />
-              <span class="hint">合计押金 <strong class="money">¥{{ (headsetCount * museum.depositPerUnit).toLocaleString() }}</strong></span>
+              <span class="hint">合计押金 <strong class="money">¥{{ (headsetCount * depositPerUnit).toLocaleString() }}</strong></span>
+              <span v-if="depositRisk?.risk" class="field-error">
+                ⚠ {{ depositRisk.reason }}
+              </span>
             </div>
             <button class="btn-primary" style="width:100%; justify-content:center"
                     :disabled="r.verifiedSize === undefined || !!r.devices.length" @click="handout">

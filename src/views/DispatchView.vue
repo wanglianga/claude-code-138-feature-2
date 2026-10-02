@@ -371,7 +371,12 @@ const loadInputs = ref<Record<string, number>>({})
         <div class="card tight">
           <div class="stat-label">借出耳麦</div>
           <div class="stat-num">{{ r.devices.filter((d) => d.status === 'lent').length }}</div>
-          <div class="small muted">其中损坏待赔 {{ r.devices.filter((d) => d.status === 'damaged').length }} 台</div>
+          <div class="small muted">
+            损坏待赔 {{ r.devices.filter((d) => d.status === 'damaged').length }} 台
+            <template v-if="r.lostDevices?.filter((l) => l.outcome === 'pending').length">
+              · <span style="color:var(--amber)">遗失待结 {{ r.lostDevices.filter((l) => l.outcome === 'pending').length }} 台（离馆核销页处理）</span>
+            </template>
+          </div>
         </div>
         <div class="card tight">
           <div class="stat-label">已收押金</div>

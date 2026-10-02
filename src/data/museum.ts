@@ -235,9 +235,16 @@ export const SECURITY_LANES: SecurityLane[] = [
 
 /** 耳麦设备库存 */
 export const HEADSET_TOTAL = 120
-export const HEADSET_DEPOSIT = 200 // 元/台
+export const HEADSET_DEPOSIT = 200 // 元/台（标准押金）
 export const DAMAGE_FEE = 50
 export const LOST_FEE = 200
+
+/**
+ * 押金风险规则（针对旅行社）：
+ * 历史上有确认遗失（赔付或确认无法找回）记录的旅行社，后续团队按加收费率收取耳麦押金。
+ */
+export const SURCHARGE_DEPOSIT = 300 // 元/台（有遗失记录的旅行社）
+export const REPAIR_FEE_DEFAULT = 80 // 保洁找回但设备损坏时的默认维修费（¥50 清理检修起步，可视损坏程度调整）
 
 /** 大团规则 */
 export const MAX_GROUP_SIZE = 60

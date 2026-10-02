@@ -44,6 +44,11 @@ describe('八大业务视图挂载冒烟', () => {
     const w = mountView(OpsView)
     expect(w.text()).toContain('展厅实时负载')
     expect(w.text()).toContain('讲解员排班')
+    expect(w.text()).toContain('耳麦库存与遗失押金处置')
+    // 种子 R6 的暂扣待找耳麦出现在保洁查找任务中
+    expect(w.text()).toContain('HS-049')
+    // 星辉国旅因历史遗失被列为押金风险旅行社
+    expect(w.text()).toContain('押金风险旅行社')
   })
 
   it('预约表单渲染全部必填字段', () => {
@@ -92,6 +97,33 @@ describe('八大业务视图挂载冒烟', () => {
     expect(w.text()).toContain('逐台核对耳麦归还')
     expect(w.text()).toContain('押金结算')
     expect(w.text()).toContain('满意度')
+  })
+
+  it('离馆核销页渲染 R6 遗失登记与暂扣处置，未结案禁止离馆', async () => {
+    const router = makeRouter()
+    router.push('/checkout/R20261001-06')
+    await router.isReady()
+    const w = mount(CheckoutView as never, { global: { plugins: [router] } })
+    expect(w.text()).toContain('鸿雁国际旅行社')
+    expect(w.text()).toContain('耳麦遗失登记与押金处置')
+    expect(w.text()).toContain('HS-049')
+    expect(w.text()).toContain('押金暂扣')
+    expect(w.text()).toContain('缺失耳麦尚未结案')
+    // 找回操作入口存在
+    expect(w.text()).toContain('找回且完好，退全部押金')
+    expect(w.text()).toContain('找回但损坏，扣维修费')
+
+    // 未结案时离馆按钮禁用
+    const finishBtn = () => w.findAll('button').find((b) => b.text().includes('团队离馆'))!
+    expect(finishBtn().attributes('disabled')).toBeDefined()
+
+    // 点击「找回且完好」办结
+    const foundBtn = w.findAll('button').find((b) => b.text().includes('找回且完好'))!
+    await foundBtn.trigger('click')
+    expect(w.text()).toContain('押金全退')
+    expect(w.text()).not.toContain('缺失耳麦尚未结案')
+    // 办结后离馆按钮解锁（库存回库联动在 store 集成测试中覆盖）
+    expect(finishBtn().attributes('disabled')).toBeUndefined()
   })
 
   it('追溯页渲染晨光职校投诉档案证据链', () => {

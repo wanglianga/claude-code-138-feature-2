@@ -55,7 +55,13 @@ export function makeHeadsets(total: number): DeviceUnit[] {
   }))
 }
 
-/** 预置耳麦：R3（参观中）借出 HS-001..024；R5（已离馆）归还 HS-025..040，其中 036 损坏 */
+/**
+ * 预置耳麦占用：
+ * - HS-001..024：R3（阳光路三小，参观中）借出
+ * - HS-025..040：R5（晨光职校，已离馆）归还，HS-036 损坏
+ * - HS-041..058：R6（鸿雁国旅，参观中）借出，HS-049 离馆缺失、押金暂扣待保洁查找
+ * - HS-059..070：R7（星辉国旅，已离馆）归还，HS-067 遗失已赔付
+ */
 function applySeedHeadsets(pool: DeviceUnit[]) {
   for (let i = 0; i < 24; i++) {
     pool[i].status = 'lent'
@@ -69,6 +75,28 @@ function applySeedHeadsets(pool: DeviceUnit[]) {
   pool[35].status = 'damaged'
   pool[35].damageFee = 50
   pool[35].note = '耳罩开裂'
+
+  // R6：17 台已完好归还，HS-049 遗失暂扣
+  for (let i = 40; i < 58; i++) {
+    pool[i].lentAt = iso('08:56')
+    if (i === 48) {
+      pool[i].status = 'lost'
+      pool[i].note = '离馆缺失待保洁查找，最后见于中庭'
+    } else {
+      pool[i].status = 'returned'
+      pool[i].returnedAt = iso('10:21')
+    }
+  }
+
+  // R7：11 台完好归还，HS-067 遗失已赔付
+  for (let i = 58; i < 70; i++) {
+    pool[i].lentAt = iso('07:55')
+    pool[i].returnedAt = iso('09:22')
+    pool[i].status = 'returned'
+  }
+  pool[66].status = 'lost'
+  pool[66].damageFee = 200
+  pool[66].note = '离馆清点缺失，团队当场赔付'
 }
 
 function lentSet(start: number, count: number): DeviceUnit[] {
@@ -90,6 +118,54 @@ function returnedSet(start: number, count: number, damagedIdx = -1): DeviceUnit[
     damageFee: i === damagedIdx ? 50 : undefined,
     note: i === damagedIdx ? '耳罩开裂' : undefined,
   }))
+}
+
+/** R6 鸿雁国旅（参观中）：18 台，HS-049 离馆缺失、押金暂扣待保洁查找，其余 17 台已归还 */
+function r6DeviceSet(): DeviceUnit[] {
+  return Array.from({ length: 18 }, (_, i) => {
+    const code = `HS-${String(41 + i).padStart(3, '0')}`
+    if (i === 8) {
+      return {
+        code,
+        status: 'lost' as const,
+        deposit: HEADSET_DEPOSIT,
+        lentAt: iso('08:56'),
+        note: '遗失暂扣：借出人 周雯，最后使用 四号厅 · 当代水墨',
+      }
+    }
+    return {
+      code,
+      status: 'returned' as const,
+      deposit: HEADSET_DEPOSIT,
+      lentAt: iso('08:56'),
+      returnedAt: iso('10:21'),
+    }
+  })
+}
+
+/** R7 星辉国旅（已离馆）：12 台，HS-067 遗失当场赔付，其余 11 台完好归还 */
+function r7DeviceSet(): DeviceUnit[] {
+  return Array.from({ length: 12 }, (_, i) => {
+    const code = `HS-${String(59 + i).padStart(3, '0')}`
+    if (i === 8) {
+      return {
+        code,
+        status: 'lost' as const,
+        deposit: HEADSET_DEPOSIT,
+        lentAt: iso('08:05'),
+        returnedAt: iso('09:22'),
+        damageFee: HEADSET_DEPOSIT,
+        note: '离馆清点缺失，团队当场赔付',
+      }
+    }
+    return {
+      code,
+      status: 'returned' as const,
+      deposit: HEADSET_DEPOSIT,
+      lentAt: iso('08:05'),
+      returnedAt: iso('09:22'),
+    }
+  })
 }
 
 export function seedReservations(): Reservation[] {
@@ -121,8 +197,10 @@ export function seedReservations(): Reservation[] {
       ],
       durationMin: 75,
       devices: [],
+      depositPerUnit: HEADSET_DEPOSIT,
       depositTotal: 0,
       depositDeduction: 0,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:10', { by: '赵老师' }),
       ],
@@ -157,8 +235,10 @@ export function seedReservations(): Reservation[] {
       ],
       durationMin: 113,
       devices: [],
+      depositPerUnit: HEADSET_DEPOSIT,
       depositTotal: 0,
       depositDeduction: 0,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:05', { by: '王领队' }),
         ev('confirm', '预约确认：周牧 / B1030 批次 / A 通道', '09:20', {
@@ -198,8 +278,10 @@ export function seedReservations(): Reservation[] {
       ],
       durationMin: 75,
       devices: lentSet(1, 24),
+      depositPerUnit: HEADSET_DEPOSIT,
       depositTotal: 24 * HEADSET_DEPOSIT,
       depositDeduction: 0,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '08:50', { by: '孙老师' }),
         ev('confirm', '预约确认：苏晓 / B0945 批次', '09:00', { by: '沈姐' }),
@@ -244,8 +326,10 @@ export function seedReservations(): Reservation[] {
       ],
       durationMin: 55,
       devices: [],
+      depositPerUnit: HEADSET_DEPOSIT,
       depositTotal: 0,
       depositDeduction: 0,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:15', { by: '刘经理' }),
         ev('confirm', '预约确认：林岚+何田田 / 分 3 批 / 无障碍通道', '09:30', {
@@ -285,8 +369,10 @@ export function seedReservations(): Reservation[] {
       ],
       durationMin: 90,
       devices: returnedSet(25, 16, 11),
+      depositPerUnit: HEADSET_DEPOSIT,
       depositTotal: 16 * HEADSET_DEPOSIT,
       depositDeduction: 50,
+      lostDevices: [],
       departAt: iso('10:05'),
       satisfaction: 3,
       complaint:
@@ -320,6 +406,169 @@ export function seedReservations(): Reservation[] {
           by: '钱老师',
           detail: '二号厅拥挤导致讲解时长缩短约 20 分钟。',
         }),
+      ],
+    },
+
+    // R6：旅行社团在馆，离馆清点少一台，团队选择押金暂扣、等待保洁查找
+    {
+      id: 'R20261001-06',
+      orgType: 'travel',
+      orgName: '鸿雁国际旅行社',
+      groupSize: 18,
+      ageBand: 'adult',
+      language: 'zh',
+      accessible: false,
+      themeId: 't_family',
+      arriveTime: iso('09:00'),
+      contactName: '吴领队',
+      contactPhone: '137****6632',
+      busInfo: '中巴 1 辆，落客区停靠',
+      needHeadsets: true,
+      headsetCount: 18,
+      note: '亲子散拼团，18 人含 6 名儿童。',
+      status: 'touring',
+      createdAt: iso('08:40'),
+      confirmedAt: iso('08:45'),
+      assignedGuideIds: ['g5'],
+      batchNo: 'B0900',
+      securityLane: 'lane_a',
+      actualArrive: iso('08:52'),
+      verifiedSize: 18,
+      route: [
+        stop('h3', '09:10', '09:35', 'done', undefined, '09:10', '09:35'),
+        stop('h5', '09:40', '10:05', 'done', undefined, '09:40', '10:05'),
+        stop('edu', '10:10', '10:35', 'done', '团队提前整队离馆，实际 10:20 离开教育体验室', '10:10', '10:20'),
+      ],
+      durationMin: 85,
+      devices: r6DeviceSet(),
+      depositPerUnit: HEADSET_DEPOSIT,
+      depositTotal: 18 * HEADSET_DEPOSIT,
+      depositDeduction: 0,
+      lostDevices: [
+        {
+          key: 'lost_seed_r6_049',
+          code: 'HS-049',
+          borrower: '团员 周雯',
+          leader: '吴领队',
+          lastHallId: 'h5',
+          note: '团员回忆耳麦遗落在五号厅沉浸光影区座位旁',
+          reportedAt: iso('10:22'),
+          resolution: 'withheld',
+          withheldAmount: HEADSET_DEPOSIT,
+          outcome: 'pending',
+        },
+      ],
+      timeline: [
+        ev('submit', '团体预约已提交', '08:40', { by: '吴领队' }),
+        ev('confirm', '预约确认：何田田 / B0900 批次', '08:45', { by: '沈姐' }),
+        ev('arrive', '团队到馆（比预约早 8 分钟）', '08:52', { by: '吴领队' }),
+        ev('headcount', '核验人数：18 人，与预约一致', '08:54', { by: '小唐' }),
+        ev('device_handout', '发放耳麦 18 台（HS-041 ~ HS-058）', '08:56', {
+          by: '老郭',
+          amount: 18 * HEADSET_DEPOSIT,
+          detail: '押金 ¥3,600 已收取',
+        }),
+        ev('guide_assign', '讲解员何田田就位', '08:58', { by: '何田田' }),
+        ev('batch_admit', 'B0900 批次经 A 通道安检入馆', '09:02', { by: '安检员' }),
+        ev('start_tour', '亲子互动探索线开始讲解', '09:10', { by: '何田田' }),
+        ev('device_return', '归还耳麦 17 台，HS-049 清点缺失', '10:21', {
+          by: '老郭',
+          detail: '17 台完好，1 台待登记遗失处置。',
+        }),
+        ev('device_lost_report', '耳麦 HS-049 离馆缺失：借出人 团员 周雯 / 负责人 吴领队 / 最后使用 五号厅 · 沉浸光影', '10:22', {
+          by: '前台 小唐',
+          detail: '团员回忆遗落在五号厅座位旁。',
+        }),
+        ev('deposit_withhold', '耳麦 HS-049 押金暂扣 ¥200，等待保洁查找结果', '10:22', {
+          by: '前台 小唐',
+          amount: 200,
+          detail: '找回完好全额退还；找回损坏扣除维修费；确认无法找回则押金不退。',
+        }),
+      ],
+    },
+
+    // R7：星辉国际旅行社当日早些时候的团，遗失一台已当场赔付 —— 其后续团 R2 按加收费率收押金
+    {
+      id: 'R20261001-07',
+      orgType: 'travel',
+      orgName: '星辉国际旅行社',
+      groupSize: 12,
+      ageBand: 'adult',
+      language: 'zh',
+      accessible: false,
+      themeId: 't_modern',
+      arriveTime: iso('08:00'),
+      contactName: '王领队',
+      contactPhone: '139****8810',
+      busInfo: '商务车 1 辆',
+      needHeadsets: true,
+      headsetCount: 12,
+      note: '加场早团，与 10:30 英语团为同一旅行社。',
+      status: 'completed',
+      createdAt: iso('07:30'),
+      confirmedAt: iso('07:40'),
+      assignedGuideIds: ['g1'],
+      batchNo: 'B0800',
+      securityLane: 'lane_a',
+      actualArrive: iso('08:02'),
+      verifiedSize: 12,
+      route: [
+        stop('h1', '08:10', '08:40', 'done', undefined, '08:10', '08:40'),
+        stop('h2', '08:45', '09:15', 'done', undefined, '08:45', '09:08'),
+        stop('h4', '09:20', '09:50', 'done', '团队赶行程提前离馆，实际 09:22 离开', '09:12', '09:22'),
+      ],
+      durationMin: 100,
+      devices: r7DeviceSet(),
+      depositPerUnit: HEADSET_DEPOSIT,
+      depositTotal: 12 * HEADSET_DEPOSIT,
+      depositDeduction: HEADSET_DEPOSIT,
+      lostDevices: [
+        {
+          key: 'lost_seed_r7_067',
+          code: 'HS-067',
+          borrower: '团员 李先生',
+          leader: '王领队',
+          lastHallId: 'h4',
+          note: '离馆清点缺失，四号厅提前离场时遗落，团队选择当场赔付',
+          reportedAt: iso('09:21'),
+          resolution: 'paid',
+          withheldAmount: HEADSET_DEPOSIT,
+          paidAt: iso('09:22'),
+          resolvedAt: iso('09:22'),
+          outcome: 'forfeit',
+        },
+      ],
+      departAt: iso('09:22'),
+      satisfaction: 4,
+      timeline: [
+        ev('submit', '团体预约已提交', '07:30', { by: '王领队' }),
+        ev('confirm', '预约确认：林岚 / B0800 批次', '07:40', { by: '沈姐' }),
+        ev('arrive', '团队到馆', '08:02', { by: '王领队' }),
+        ev('headcount', '核验人数：12 人', '08:03', { by: '小唐' }),
+        ev('device_handout', '发放耳麦 12 台（HS-059 ~ HS-070）', '08:05', {
+          by: '老郭',
+          amount: 12 * HEADSET_DEPOSIT,
+        }),
+        ev('guide_assign', '讲解员林岚就位', '08:07', { by: '林岚' }),
+        ev('batch_admit', 'B0800 批次入馆', '08:08', { by: '安检员' }),
+        ev('start_tour', '近现代书画线开始讲解', '08:10', { by: '林岚' }),
+        ev('device_return', '归还耳麦 11 台，HS-067 清点缺失', '09:21', {
+          by: '老郭',
+          detail: '11 台完好，1 台遗失。',
+        }),
+        ev('device_lost_report', '耳麦 HS-067 离馆缺失：借出人 团员 李先生 / 负责人 王领队 / 最后使用 四号厅 · 当代水墨', '09:21', {
+          by: '前台 小唐',
+          detail: '四号厅提前离场时遗落。',
+        }),
+        ev('deposit_withhold', '耳麦 HS-067 团队当场赔付，扣除押金 ¥200 结案', '09:22', {
+          by: '前台 小唐',
+          amount: 200,
+        }),
+        ev('deposit_settle', '押金结算：¥2,400 中扣除 ¥200，退还 ¥2,200', '09:22', {
+          by: '老郭',
+          amount: 200,
+        }),
+        ev('complete', '团队离馆，满意度 4/5', '09:22', { by: '小唐' }),
       ],
     },
   ]

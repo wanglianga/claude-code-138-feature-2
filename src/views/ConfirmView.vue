@@ -110,6 +110,16 @@ function doReject() {
 const hallState = (hallId: string) => museum.hallById(hallId)!
 const conflicts = computed(() => projected.value.filter((p) => p.projectedLoad > p.capacity))
 const guideNeeded = computed(() => (r.value ? Math.ceil(r.value.groupSize / 25) : 1))
+
+/** 该团体到馆发设备时将适用的耳麦押金费率（受旅行社历史遗失记录影响） */
+const depositRate = computed(() =>
+  r.value ? store.depositRateFor(r.value.orgType, r.value.orgName) : null,
+)
+const depositPreview = computed(() =>
+  r.value && depositRate.value && r.value.needHeadsets
+    ? r.value.headsetCount * depositRate.value.perUnit
+    : 0,
+)
 </script>
 
 <template>
@@ -148,6 +158,10 @@ const guideNeeded = computed(() => (r.value ? Math.ceil(r.value.groupSize / 25) 
           <div><div class="stat-label">无障碍 / 耳麦</div><div style="padding-top:5px">{{ r.accessible ? '♿ 需要' : '不需要' }} · {{ r.needHeadsets ? `${r.headsetCount} 台` : '不借用' }}</div></div>
         </div>
         <div v-if="r.note" class="section-tip" style="margin-top:12px; margin-bottom:0">联系人备注：{{ r.note }}</div>
+        <div v-if="r.needHeadsets && depositRate" class="callout" :class="depositRate.risk ? 'danger' : 'info'" style="margin-top:12px; margin-bottom:0">
+          🎧 耳麦 {{ r.headsetCount }} 台，押金费率 <strong>¥{{ depositRate.perUnit }}/台</strong>，预计收取
+          <strong class="money">¥{{ depositPreview.toLocaleString() }}</strong>。{{ depositRate.reason }}。
+        </div>
       </div>
 
       <!-- 容量与闭展 -->
