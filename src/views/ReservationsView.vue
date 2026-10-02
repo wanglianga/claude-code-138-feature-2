@@ -79,7 +79,10 @@ const FILTERS: (ReservationStatus | 'all')[] = [
             <td class="small">{{ museum.themeById(r.themeId)?.name }}<div class="muted">{{ { zh: '中文', en: '英语', ja: '日语' }[r.language] }}{{ r.accessible ? ' · ♿' : '' }}</div></td>
             <td class="small">{{ r.assignedGuideIds.map((g) => museum.guideById(g)?.name).join('、') || '—' }}</td>
             <td class="small">{{ r.batchNo || '—' }}<div class="muted">{{ museum.lanes.find((l) => l.id === r.securityLane)?.name ?? '—' }}</div></td>
-            <td><StatusBadge :status="r.status" /></td>
+            <td><StatusBadge :status="r.status" />
+              <span v-if="(r.lostDevices ?? []).some((l) => ['searching','held'].includes(l.state))" class="tag tag-warn" style="margin-top:3px">押金暂扣</span>
+              <span v-if="r.depositRate > 1" class="tag tag-maint" style="margin-top:3px">押金 {{ r.depositRate }}×</span>
+            </td>
             <td class="small" style="white-space:nowrap">
               <RouterLink v-if="r.status === 'submitted'" class="btn-sm btn-gold" :to="`/confirm/${r.id}`">确认</RouterLink>
               <RouterLink v-if="r.status === 'confirmed'" class="btn-sm" :to="`/front/${r.id}`">到馆办理</RouterLink>
@@ -98,7 +101,11 @@ const FILTERS: (ReservationStatus | 'all')[] = [
                   <dl class="kv">
                     <dt>联系人</dt><dd>{{ r.contactName }} {{ r.contactPhone }}</dd>
                     <dt>车辆</dt><dd>{{ r.busInfo }}</dd>
-                    <dt>耳麦</dt><dd>{{ r.needHeadsets ? `借用 ${r.headsetCount} 台，押金 ¥${r.depositTotal.toLocaleString()}` : '不借用' }}</dd>
+                    <dt>耳麦</dt>
+                    <dd>
+                      {{ r.needHeadsets ? `借用 ${r.headsetCount} 台，押金 ¥${r.depositTotal.toLocaleString()}${r.depositRate > 1 ? `（${r.depositRate} 倍）` : ''}` : '不借用' }}
+                      <span v-if="r.depositHeld" style="color:var(--amber)">；遗失暂扣 ¥{{ r.depositHeld }}，<RouterLink :to="`/checkout/${r.id}`">去处理押金</RouterLink></span>
+                    </dd>
                     <dt>讲解时长</dt><dd>{{ r.durationMin }} 分钟</dd>
                     <dt v-if="r.confirmNote">确认备注</dt><dd v-if="r.confirmNote">{{ r.confirmNote }}</dd>
                     <dt v-if="r.complaint">投诉</dt><dd v-if="r.complaint" style="color:var(--red)">{{ r.complaint }}</dd>

@@ -141,6 +141,8 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { border-color: var(--gold-soft); box-shadow: 0 0 0 3px rgba(201,178,128,0.18); }
 input:disabled { background: var(--paper-2); color: var(--ink-3); }
+.input-warn { border-color: var(--red); box-shadow: 0 0 0 3px rgba(168, 74, 60, 0.15); }
+.queue-item { padding: 10px 12px; cursor: pointer; border-radius: 8px; }
 textarea { resize: vertical; min-height: 58px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
@@ -230,6 +232,7 @@ table.data tr.clickable:hover td { background: rgba(201,178,128,0.08); }
   background: var(--card); border: 2px solid var(--gold-soft);
 }
 .timeline li.danger::before { border-color: var(--red); }
+.timeline li.warn::before { border-color: var(--amber); }
 .timeline li.ok::before { border-color: var(--green); }
 .timeline .t-time { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .timeline .t-title { font-size: 13.5px; margin: 1px 0; }

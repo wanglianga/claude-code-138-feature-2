@@ -1,10 +1,11 @@
 import { defineStore } from 'pinia'
-import { DAMAGE_FEE, LOST_FEE } from '@/data/museum'
+import { DAMAGE_FEE, LOST_FEE, REPAIR_FEE } from '@/data/museum'
 import { seedReservations } from '@/data/seed'
 import {
   buildRoute,
   plannedDuration,
 } from '@/lib/schedule'
+import { depositPerUnit, depositRateFor } from '@/lib/deposit'
 import { addHM, hmOfISO, toMin, uid } from '@/lib/time'
 import { useMuseumStore } from './museum'
 import type {
@@ -13,6 +14,8 @@ import type {
   GroupType,
   HallClosure,
   Language,
+  LossDisposition,
+  LostDeviceRecord,
   Reservation,
   ReservationStatus,
   RouteStop,
@@ -50,6 +53,16 @@ export const useReservationsStore = defineStore('reservations', {
     /** 当日讲解总时长（分钟），已确认+在馆团 */
     activeList: (s) =>
       s.list.filter((r) => ['confirmed', 'arrived', 'touring'].includes(r.status)),
+    /** 全馆仍未结案的耳麦遗失档案（现场寻找中 / 押金暂扣中） */
+    outstandingLosses(s): { res: Reservation; loss: LostDeviceRecord }[] {
+      const out: { res: Reservation; loss: LostDeviceRecord }[] = []
+      for (const r of s.list) {
+        for (const loss of r.lostDevices ?? []) {
+          if (loss.state === 'searching' || loss.state === 'held') out.push({ res: r, loss })
+        }
+      }
+      return out.sort((a, b) => b.loss.reportedAt.localeCompare(a.loss.reportedAt))
+    },
   },
 
   actions: {
@@ -73,6 +86,7 @@ export const useReservationsStore = defineStore('reservations', {
         live: museum.maintenance,
       })
       const seq = String(this.list.length + 1).padStart(2, '0')
+      const rate = depositRateFor(this.list, input.orgType, input.orgName)
       const r: Reservation = {
         id: `R20261001-${seq}`,
         ...input,
@@ -84,6 +98,10 @@ export const useReservationsStore = defineStore('reservations', {
         devices: [],
         depositTotal: 0,
         depositDeduction: 0,
+        depositHeld: 0,
+        depositRefunded: 0,
+        depositRate: rate,
+        lostDevices: [],
         timeline: [],
       }
       // 避免 id 冲突
@@ -180,12 +198,15 @@ export const useReservationsStore = defineStore('reservations', {
       if (!r || !r.needHeadsets) return
       const at = museum.nowISO
       const picked = museum.lendFromPool(count, r.id, at)
+      const unit = depositPerUnit(r.depositRate)
+      for (const d of picked) d.deposit = unit
       r.devices = picked
-      r.depositTotal = picked.length * museum.depositPerUnit
+      r.depositTotal = picked.length * unit
       const codes = picked.length ? `${picked[0].code} ~ ${picked[picked.length - 1].code}` : ''
+      const rateNote = r.depositRate > 1 ? `（该旅行社有耳麦遗失记录，押金按 ${r.depositRate} 倍 ¥${unit}/台收取）` : ''
       this.log(r, 'device_handout', `发放耳麦 ${picked.length} 台（${codes}）`, at, by, {
         amount: r.depositTotal,
-        detail: `押金 ¥${r.depositTotal.toLocaleString()} 已收取${picked.length < count ? '，库存不足部分未发' : ''}`,
+        detail: `押金 ¥${r.depositTotal.toLocaleString()} 已收取${rateNote}${picked.length < count ? '，库存不足部分未发' : ''}`,
       })
     },
 
@@ -368,7 +389,7 @@ export const useReservationsStore = defineStore('reservations', {
         r.devices.push({
           code: newCode,
           status: 'lent',
-          deposit: museum.depositPerUnit,
+          deposit: depositPerUnit(r.depositRate),
           resId: r.id,
           lentAt: museum.nowISO,
         })
@@ -378,7 +399,30 @@ export const useReservationsStore = defineStore('reservations', {
       })
     },
 
-    // ---------- 离馆 ----------
+    // ---------- 离馆：设备归还 / 耳麦遗失押金处理 ----------
+    /** 重算预约的押金两项：已确定扣款、暂扣中（已退金额在找回时累计） */
+    recalcDeposit(r: Reservation) {
+      let deduction = 0
+      let held = 0
+      for (const d of r.devices) {
+        if (d.status === 'damaged' || d.status === 'repairing') deduction += d.damageFee ?? DAMAGE_FEE
+        else if (d.status === 'lost') {
+          const loss = (r.lostDevices ?? []).find((l) => l.code === d.code)
+          if (!loss) deduction += LOST_FEE
+          else if (loss.state === 'paid') deduction += loss.finalFee ?? LOST_FEE
+          else if (loss.state === 'repaired') deduction += loss.finalFee ?? REPAIR_FEE
+          else if (loss.state === 'held' || loss.state === 'searching') held += loss.heldAmount
+          // refunded（找回完好）：无扣款，退还金额累计在 depositRefunded
+        }
+      }
+      r.depositDeduction = deduction
+      r.depositHeld = held
+    },
+
+    /**
+     * 离馆逐台清点：完好 / 损坏直接结算；遗失当场赔付的直接建遗失档案结案。
+     * 需要「现场寻找 / 押金暂扣」的遗失，请在清点后调用 reportLostDevice 走挂账流程。
+     */
     returnDevices(
       id: string,
       results: { code: string; result: 'ok' | 'damaged' | 'lost'; note?: string }[],
@@ -410,32 +454,207 @@ export const useReservationsStore = defineStore('reservations', {
           })
           dmgN++
         } else {
-          dev.status = 'lost'
-          dev.damageFee = LOST_FEE
-          dev.note = item.note ?? '设备遗失'
-          museum.syncPoolDevice(item.code, 'lost', { damageFee: LOST_FEE, note: item.note })
+          // 清点为遗失：默认建遗失档案（团队可在页面改为现场寻找/押金暂扣）
+          const lastHallId =
+            r.route.find((s) => s.state === 'current' || s.state === 'congested')?.hallId ??
+            [...r.route].reverse().find((s) => s.state === 'done')?.hallId ??
+            r.route[r.route.length - 1]?.hallId ??
+            ''
+          this.reportLostDevice(r.id, {
+            code: item.code,
+            borrower: item.note?.trim() || '离馆清点未找到使用人',
+            teamLeader: r.contactName,
+            lastHallId,
+            note: '离馆清点设备缺失',
+            disposition: 'paid',
+          }, by)
           lostN++
         }
       }
-      // 扣款统计包含途中换机已登记损坏/遗失的设备
-      r.depositDeduction = r.devices.reduce(
-        (sum, d) => sum + (d.status === 'damaged' ? DAMAGE_FEE : d.status === 'lost' ? LOST_FEE : 0),
-        0,
-      )
+      this.recalcDeposit(r)
       this.log(r, 'device_return', `归还耳麦：完好 ${okN}，损坏 ${dmgN}，遗失 ${lostN}`, museum.nowISO, by)
+    },
+
+    /**
+     * 离馆发现耳麦缺失：前台标记设备编号、借出人、团队负责人、最后使用展厅，
+     * 并选择处置方式：现场寻找 / 押金暂扣 / 当场赔付。
+     */
+    reportLostDevice(
+      id: string,
+      payload: {
+        code: string
+        borrower: string
+        teamLeader: string
+        lastHallId: string
+        note: string
+        disposition: LossDisposition
+      },
+      by: string,
+    ): LostDeviceRecord | null {
+      const r = this.byId(id)
+      const museum = useMuseumStore()
+      if (!r) return null
+      const dev = r.devices.find((d) => d.code === payload.code)
+      if (!dev) return null
+      const at = museum.nowISO
+      const unit = dev.deposit || depositPerUnit(r.depositRate)
+
+      const record: LostDeviceRecord = {
+        id: uid('loss'),
+        code: payload.code,
+        borrower: payload.borrower,
+        teamLeader: payload.teamLeader,
+        lastHallId: payload.lastHallId,
+        reportedAt: at,
+        note: payload.note,
+        disposition: payload.disposition,
+        state: payload.disposition === 'paid' ? 'paid' : payload.disposition === 'hold' ? 'held' : 'searching',
+        heldAmount: payload.disposition === 'paid' ? 0 : unit,
+        finalFee: payload.disposition === 'paid' ? LOST_FEE : undefined,
+      }
+      r.lostDevices.push(record)
+
+      // 设备池同步为遗失挂账，损坏/遗失设备不会再被分配给下一场团队
+      const poolNote = `${payload.note}；借出人 ${payload.borrower}；负责人 ${payload.teamLeader}；最后使用 ${museum.hallById(payload.lastHallId)?.name ?? '—'}`
+      if (payload.disposition === 'paid') museum.markPoolPaidLost(payload.code, poolNote)
+      else museum.markPoolLost(payload.code, r.id, poolNote)
+      dev.status = 'lost'
+      dev.resId = undefined
+      dev.lostResId = r.id
+      dev.damageFee = payload.disposition === 'paid' ? LOST_FEE : undefined
+      dev.returnedAt = undefined
+      dev.note = `遗失：${payload.note}`
+
+      const hallName = museum.hallById(payload.lastHallId)?.name ?? '—'
+      this.log(
+        r,
+        'device_lost_report',
+        `耳麦 ${payload.code} 离馆清点缺失（${payload.disposition === 'paid' ? '当场赔付' : payload.disposition === 'hold' ? '押金暂扣' : '现场寻找'}）`,
+        at,
+        by,
+        {
+          amount: payload.disposition === 'paid' ? LOST_FEE : unit,
+          detail: `借出人：${payload.borrower}；团队负责人：${payload.teamLeader}；最后使用展厅：${hallName}。${payload.note}`,
+        },
+      )
+      if (payload.disposition === 'hold' || payload.disposition === 'search') {
+        this.log(
+          r,
+          'deposit_held',
+          payload.disposition === 'hold'
+            ? `押金暂扣 ¥${unit}：等待保洁核查 ${payload.code}`
+            : `团队现场寻找 ${payload.code}，押金 ¥${unit} 暂缓结算`,
+          at,
+          by,
+          { amount: unit },
+        )
+      }
+      this.recalcDeposit(r)
+      return record
+    },
+
+    /**
+     * 保洁后续找回设备：按设备状态决定退还押金或扣除维修费。
+     * - condition=ok：完好找回，暂扣押金全额退还；
+     * - condition=damaged：找回但损坏，扣除维修费 ¥50，余额退还。
+     * 「寻找未果」可传 found=false 转当场赔付（扣 ¥200）。
+     */
+    resolveLostDevice(
+      id: string,
+      lossId: string,
+      payload: { found: boolean; condition?: 'ok' | 'damaged'; note?: string; foundBy?: string },
+      by: string,
+    ) {
+      const r = this.byId(id)
+      const museum = useMuseumStore()
+      if (!r) return
+      const loss = r.lostDevices.find((l) => l.id === lossId)
+      if (!loss || ['paid', 'refunded', 'repaired'].includes(loss.state)) return
+      const at = museum.nowISO
+      const dev = r.devices.find((d) => d.code === loss.code)
+      const unit = loss.heldAmount || dev?.deposit || depositPerUnit(r.depositRate)
+
+      if (payload.found && payload.condition === 'ok') {
+        loss.state = 'refunded'
+        loss.foundAt = at
+        loss.foundCondition = 'ok'
+        loss.foundBy = payload.foundBy ?? '保洁'
+        loss.resolvedNote = payload.note
+        loss.finalFee = 0
+        if (dev) {
+          dev.status = 'returned'
+          dev.returnedAt = at
+          dev.damageFee = 0
+          dev.note = `保洁找回，设备完好：${payload.note ?? ''}`.trim()
+        }
+        museum.resolvePoolFound(loss.code, 'ok', at, payload.foundBy ?? '保洁', payload.note)
+        r.depositRefunded += unit
+        this.log(r, 'device_found', `${payload.foundBy ?? '保洁'}找回 ${loss.code}，设备完好`, at, payload.foundBy ?? '保洁', {
+          detail: payload.note ? `找回位置/情况：${payload.note}` : undefined,
+        })
+        this.log(r, 'deposit_refund', `暂扣押金 ¥${unit} 全额退还 ${r.orgName}`, at, by, { amount: unit })
+      } else if (payload.found && payload.condition === 'damaged') {
+        loss.state = 'repaired'
+        loss.foundAt = at
+        loss.foundCondition = 'damaged'
+        loss.foundBy = payload.foundBy ?? '保洁'
+        loss.resolvedNote = payload.note
+        loss.finalFee = REPAIR_FEE
+        const back = unit - REPAIR_FEE
+        if (dev) {
+          dev.status = 'repairing'
+          dev.returnedAt = at
+          dev.damageFee = REPAIR_FEE
+          dev.note = `保洁找回但已损坏，扣维修费：${payload.note ?? ''}`.trim()
+        }
+        museum.resolvePoolFound(loss.code, 'damaged', at, payload.foundBy ?? '保洁', payload.note)
+        r.depositRefunded += Math.max(0, back)
+        this.log(r, 'device_found', `保洁找回 ${loss.code}，但设备已损坏，转维修`, at, payload.foundBy ?? '保洁', {
+          detail: payload.note ? `损坏情况：${payload.note}` : undefined,
+        })
+        this.log(
+          r,
+          'deposit_refund',
+          `暂扣押金 ¥${unit} 扣除维修费 ¥${REPAIR_FEE}，退还 ¥${Math.max(0, back)}`,
+          at,
+          by,
+          { amount: REPAIR_FEE },
+        )
+      } else {
+        // 寻找未果 → 转赔付结案
+        loss.state = 'paid'
+        loss.finalFee = LOST_FEE
+        loss.resolvedNote = payload.note ?? '保洁核查后仍未找到，按遗失赔付结案'
+        loss.heldAmount = 0
+        if (dev) {
+          dev.status = 'lost'
+          dev.damageFee = LOST_FEE
+          dev.note = loss.resolvedNote
+        }
+        museum.markPoolPaidLost(loss.code, loss.resolvedNote)
+        this.log(r, 'device_lost_report', `寻找未果，${loss.code} 按遗失结案`, at, by, {
+          detail: loss.resolvedNote,
+        })
+      }
+      this.recalcDeposit(r)
     },
 
     settleDeposit(id: string, by: string) {
       const r = this.byId(id)
       const museum = useMuseumStore()
       if (!r) return
+      const settled = r.depositDeduction
+      const held = r.depositHeld
+      const back = r.depositTotal - settled - held
       this.log(
         r,
         'deposit_settle',
-        `押金结算：¥${r.depositTotal.toLocaleString()} 中扣除 ¥${r.depositDeduction}，退还 ¥${(r.depositTotal - r.depositDeduction).toLocaleString()}`,
+        held > 0
+          ? `押金阶段性结算：¥${r.depositTotal.toLocaleString()} 中扣除 ¥${settled}、暂扣 ¥${held} 待保洁核查，现退 ¥${back.toLocaleString()}`
+          : `押金结算：¥${r.depositTotal.toLocaleString()} 中扣除 ¥${settled}，退还 ¥${back.toLocaleString()}`,
         museum.nowISO,
         by,
-        { amount: r.depositDeduction },
+        { amount: settled },
       )
     },
 
@@ -466,5 +685,16 @@ export const useReservationsStore = defineStore('reservations', {
     },
   },
 
-  persist: { key: 'museum-reservations' },
+  persist: {
+    key: 'museum-reservations',
+    // 兼容旧版本 localStorage 中缺少遗失押金字段的预约
+    afterHydrate: (ctx) => {
+      for (const r of ctx.store.list as Reservation[]) {
+        r.depositHeld ??= 0
+        r.depositRefunded ??= 0
+        r.depositRate ??= 1
+        r.lostDevices ??= []
+      }
+    },
+  },
 })

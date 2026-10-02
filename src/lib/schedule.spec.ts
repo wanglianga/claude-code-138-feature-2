@@ -208,4 +208,29 @@ describe('Reservation 种子完整性', () => {
     expect(r3.devices.every((d) => d.status === 'lent')).toBe(true)
     expect(r3.depositTotal).toBe(4800)
   })
+
+  it('R6 鸿雁假期已离馆但 HS-041 遗失押金暂扣中', () => {
+    const r6 = byId('R20261001-06')
+    expect(r6.orgType).toBe('travel')
+    expect(r6.status).toBe('completed')
+    expect(r6.lostDevices).toHaveLength(1)
+    const loss = r6.lostDevices[0]
+    expect(loss.code).toBe('HS-041')
+    expect(loss.state).toBe('held')
+    expect(loss.heldAmount).toBe(200)
+    expect(loss.borrower).toContain('陈晨')
+    expect(loss.teamLeader).toBe('周领队')
+    expect(loss.lastHallId).toBe('courtyard')
+    expect(r6.depositHeld).toBe(200)
+    expect(r6.depositDeduction).toBe(0)
+    // 其余 11 台完好归还
+    expect(r6.devices.filter((d) => d.status === 'returned')).toHaveLength(11)
+  })
+
+  it('R7 同一旅行社的后续预约适用 1.5 倍押金', () => {
+    const r7 = byId('R20261001-07')
+    expect(r7.orgType).toBe('travel')
+    expect(r7.orgName).toBe('鸿雁假期')
+    expect(r7.depositRate).toBe(1.5)
+  })
 })

@@ -1,5 +1,5 @@
 import { HEADSET_DEPOSIT, HALLS, TODAY } from '@/data/museum'
-import type { DeviceUnit, Reservation, RouteStop, TimelineEvent } from '@/types'
+import type { DeviceUnit, LostDeviceRecord, Reservation, RouteStop, TimelineEvent } from '@/types'
 
 export function iso(hm: string, day = TODAY): string {
   return `${day}T${hm}:00`
@@ -55,7 +55,7 @@ export function makeHeadsets(total: number): DeviceUnit[] {
   }))
 }
 
-/** 预置耳麦：R3（参观中）借出 HS-001..024；R5（已离馆）归还 HS-025..040，其中 036 损坏 */
+/** 预置耳麦：R3（参观中）借出 HS-001..024；R5（已离馆）归还 HS-025..040，其中 036 损坏；R6（已离馆）HS-041 遗失暂扣，042..052 已归还 */
 function applySeedHeadsets(pool: DeviceUnit[]) {
   for (let i = 0; i < 24; i++) {
     pool[i].status = 'lent'
@@ -69,6 +69,16 @@ function applySeedHeadsets(pool: DeviceUnit[]) {
   pool[35].status = 'damaged'
   pool[35].damageFee = 50
   pool[35].note = '耳罩开裂'
+  // R6 鸿雁假期：HS-041 遗失挂账（押金暂扣中），HS-042..052 已归还
+  pool[40].status = 'lost'
+  pool[40].lentAt = iso('08:27')
+  pool[40].lostResId = 'R20261001-06'
+  pool[40].note = '离馆清点缺失；借出人 团员陈晨；团队负责人 周领队；最后使用 中庭 · 公共艺术区'
+  for (let i = 41; i < 52; i++) {
+    pool[i].status = 'returned'
+    pool[i].lentAt = iso('08:27')
+    pool[i].returnedAt = iso('10:08')
+  }
 }
 
 function lentSet(start: number, count: number): DeviceUnit[] {
@@ -90,6 +100,43 @@ function returnedSet(start: number, count: number, damagedIdx = -1): DeviceUnit[
     damageFee: i === damagedIdx ? 50 : undefined,
     note: i === damagedIdx ? '耳罩开裂' : undefined,
   }))
+}
+
+/** R6 鸿雁假期：HS-041 遗失暂扣，HS-042..052 完好归还（共 12 台） */
+function r6DeviceSet(): DeviceUnit[] {
+  const devs: DeviceUnit[] = [
+    {
+      code: 'HS-041',
+      status: 'lost',
+      deposit: HEADSET_DEPOSIT,
+      lostResId: 'R20261001-06',
+      lentAt: iso('08:27'),
+      note: '遗失：离馆清点缺失，最后使用为中庭 · 公共艺术区',
+    },
+  ]
+  for (let i = 41; i < 52; i++) {
+    devs.push({
+      code: `HS-${String(i + 1).padStart(3, '0')}`,
+      status: 'returned',
+      deposit: HEADSET_DEPOSIT,
+      lentAt: iso('08:27'),
+      returnedAt: iso('10:08'),
+    })
+  }
+  return devs
+}
+
+const r6Loss: LostDeviceRecord = {
+  id: 'loss_seed_hs041',
+  code: 'HS-041',
+  borrower: '团员陈晨（家长转述）',
+  teamLeader: '周领队',
+  lastHallId: 'courtyard',
+  reportedAt: iso('10:08'),
+  note: '团队在中庭公共艺术区自由活动后集合离场，清点时少一台，回拨耳麦无人接听，已通知保洁留意。',
+  disposition: 'hold',
+  state: 'held',
+  heldAmount: 200,
 }
 
 export function seedReservations(): Reservation[] {
@@ -123,6 +170,10 @@ export function seedReservations(): Reservation[] {
       devices: [],
       depositTotal: 0,
       depositDeduction: 0,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:10', { by: '赵老师' }),
       ],
@@ -159,6 +210,10 @@ export function seedReservations(): Reservation[] {
       devices: [],
       depositTotal: 0,
       depositDeduction: 0,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:05', { by: '王领队' }),
         ev('confirm', '预约确认：周牧 / B1030 批次 / A 通道', '09:20', {
@@ -200,6 +255,10 @@ export function seedReservations(): Reservation[] {
       devices: lentSet(1, 24),
       depositTotal: 24 * HEADSET_DEPOSIT,
       depositDeduction: 0,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '08:50', { by: '孙老师' }),
         ev('confirm', '预约确认：苏晓 / B0945 批次', '09:00', { by: '沈姐' }),
@@ -246,6 +305,10 @@ export function seedReservations(): Reservation[] {
       devices: [],
       depositTotal: 0,
       depositDeduction: 0,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [],
       timeline: [
         ev('submit', '团体预约已提交', '09:15', { by: '刘经理' }),
         ev('confirm', '预约确认：林岚+何田田 / 分 3 批 / 无障碍通道', '09:30', {
@@ -287,6 +350,10 @@ export function seedReservations(): Reservation[] {
       devices: returnedSet(25, 16, 11),
       depositTotal: 16 * HEADSET_DEPOSIT,
       depositDeduction: 50,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [],
       departAt: iso('10:05'),
       satisfaction: 3,
       complaint:
@@ -319,6 +386,119 @@ export function seedReservations(): Reservation[] {
         ev('complaint', '投诉：讲解缩水、等待过长', '10:20', {
           by: '钱老师',
           detail: '二号厅拥挤导致讲解时长缩短约 20 分钟。',
+        }),
+      ],
+    },
+    {
+      // R6：旅行社团已离馆，但 HS-041 遗失押金暂扣中——用于演示保洁后续核查与押金处理
+      id: 'R20261001-06',
+      orgType: 'travel',
+      orgName: '鸿雁假期',
+      groupSize: 12,
+      ageBand: 'mixed',
+      language: 'zh',
+      accessible: false,
+      themeId: 't_sculpture',
+      arriveTime: iso('08:25'),
+      contactName: '周领队',
+      contactPhone: '137****9032',
+      busInfo: '商务车 1 辆，落客区即停即走',
+      needHeadsets: true,
+      headsetCount: 12,
+      note: '半日精品小团，含 2 名儿童。',
+      status: 'completed',
+      createdAt: iso('08:00'),
+      confirmedAt: iso('08:08'),
+      assignedGuideIds: ['g3'],
+      batchNo: 'B0830',
+      securityLane: 'lane_b',
+      actualArrive: iso('08:25'),
+      verifiedSize: 12,
+      route: [
+        stop('h3', '08:35', '09:02', 'done', undefined, '08:35', '09:00'),
+        stop('h5', '09:07', '09:34', 'done', undefined, '09:05', '09:32'),
+        stop('courtyard', '09:39', '10:06', 'done', undefined, '09:37', '10:06'),
+      ],
+      durationMin: 91,
+      devices: r6DeviceSet(),
+      depositTotal: 12 * HEADSET_DEPOSIT,
+      depositDeduction: 0,
+      depositHeld: 200,
+      depositRefunded: 0,
+      depositRate: 1,
+      lostDevices: [r6Loss],
+      departAt: iso('10:09'),
+      satisfaction: 4,
+      timeline: [
+        ev('submit', '团体预约已提交', '08:00', { by: '周领队' }),
+        ev('confirm', '预约确认：苏晓 / B0830 批次 / B 通道', '08:08', { by: '沈姐' }),
+        ev('arrive', '团队到馆（准时）', '08:25', { by: '周领队' }),
+        ev('headcount', '前台核验人数：12 人，与预约一致', '08:26', { by: '小唐' }),
+        ev('device_handout', '发放耳麦 12 台（HS-041 ~ HS-052）', '08:27', {
+          by: '老郭',
+          amount: 12 * HEADSET_DEPOSIT,
+          detail: '押金 ¥2,400 已收取',
+        }),
+        ev('batch_admit', 'B0830 批次经 B 通道安检入馆', '08:30', { by: '安检员' }),
+        ev('start_tour', '雕塑与公共艺术线开始讲解', '08:35', { by: '苏晓' }),
+        ev('device_return', '归还耳麦 11 台（HS-042 ~ HS-052），HS-041 清点缺失', '10:08', {
+          by: '老郭',
+          detail: '11 台完好；HS-041 暂按遗失登记。',
+        }),
+        ev('device_lost_report', '耳麦 HS-041 离馆清点缺失（押金暂扣）', '10:08', {
+          by: '前台主管 沈姐',
+          amount: 200,
+          detail:
+            '借出人：团员陈晨（家长转述）；团队负责人：周领队；最后使用展厅：中庭 · 公共艺术区。团队在中庭自由活动后集合离场，回拨耳麦无人接听，已通知保洁留意。',
+        }),
+        ev('deposit_held', '押金暂扣 ¥200：等待保洁核查 HS-041', '10:08', {
+          by: '前台主管 沈姐',
+          amount: 200,
+        }),
+        ev('deposit_settle', '押金阶段性结算：¥2,400 中扣除 ¥0、暂扣 ¥200 待保洁核查，现退 ¥2,200', '10:09', {
+          by: '老郭',
+          amount: 0,
+        }),
+        ev('complete', '团队先行离馆，满意度 4/5；遗失设备待保洁后续核查', '10:09', { by: '小唐' }),
+      ],
+    },
+    {
+      // R7：同一家旅行社的下午后续预约——受 HS-041 遗失记录影响，押金按 1.5 倍收取
+      id: 'R20261001-07',
+      orgType: 'travel',
+      orgName: '鸿雁假期',
+      groupSize: 20,
+      ageBand: 'adult',
+      language: 'zh',
+      accessible: false,
+      themeId: 't_master',
+      arriveTime: iso('13:30'),
+      contactName: '周领队',
+      contactPhone: '137****9032',
+      busInfo: '中巴 1 辆',
+      needHeadsets: true,
+      headsetCount: 20,
+      note: '同一家旅行社下午加开场次；上午场有一台耳麦遗失暂扣未结案。',
+      status: 'submitted',
+      createdAt: iso('10:20'),
+      assignedGuideIds: [],
+      route: [
+        stop('h2', '13:40', '14:03', 'planned'),
+        stop('h4', '14:08', '14:31', 'planned'),
+        stop('h6', '14:36', '14:49', 'planned'),
+      ],
+      durationMin: 69,
+      devices: [],
+      depositTotal: 0,
+      depositDeduction: 0,
+      depositHeld: 0,
+      depositRefunded: 0,
+      depositRate: 1.5,
+      lostDevices: [],
+      timeline: [
+        ev('submit', '团体预约已提交（系统提示该旅行社有未结案耳麦遗失，押金按 1.5 倍收取）', '10:20', {
+          by: '周领队',
+          detail: '20 台耳麦 × ¥300 = ¥6,000 押金，确认时向领队明示。',
         }),
       ],
     },

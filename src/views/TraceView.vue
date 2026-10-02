@@ -62,6 +62,27 @@ function submitReply() {
 }
 
 const deviceRows = computed(() => r.value?.devices ?? [])
+
+const lossMap = computed(() => {
+  const m = new Map((r.value?.lostDevices ?? []).map((l) => [l.code, l]))
+  return m
+})
+
+const DEVICE_STATUS_TEXT: Record<string, string> = {
+  available: '在库',
+  lent: '借出中',
+  returned: '完好归还',
+  damaged: '损坏',
+  lost: '遗失',
+  repairing: '找回损坏·送修',
+}
+
+/** 押金流水（暂扣 / 退还 / 结算） */
+const depositEvents = computed(() =>
+  (r.value?.timeline ?? []).filter((e) =>
+    ['deposit_settle', 'deposit_held', 'deposit_refund', 'device_lost_report', 'device_found'].includes(e.kind),
+  ),
+)
 </script>
 
 <template>
@@ -174,31 +195,71 @@ const deviceRows = computed(() => r.value?.devices ?? [])
           <div class="card">
             <div class="card-title">
               设备借还与押金
-              <span class="aside">借出 {{ deviceRows.length }} 台</span>
+              <span class="aside">借出 {{ deviceRows.length }} 台 · 遗失档案 {{ r.lostDevices?.length ?? 0 }} 条</span>
             </div>
             <div v-if="!deviceRows.length" class="empty small">未借用耳麦</div>
-            <table v-else class="data">
-              <thead><tr><th>编号</th><th>借出</th><th>归还</th><th>状态</th><th>扣款</th></tr></thead>
-              <tbody>
-                <tr v-for="d in deviceRows" :key="d.code">
-                  <td class="mono small">{{ d.code }}</td>
-                  <td class="small mono">{{ d.lentAt?.slice(11, 16) }}</td>
-                  <td class="small mono">{{ d.returnedAt?.slice(11, 16) ?? '—' }}</td>
-                  <td class="small">
-                    <span class="tag" :class="{ 'tag-ok': d.status === 'returned', 'tag-maint': d.status === 'damaged' || d.status === 'lost', 'tag-warn': d.status === 'lent' }">
-                      {{ { available: '在库', lent: '借出中', returned: '完好归还', damaged: '损坏', lost: '遗失' }[d.status] }}
+            <template v-else>
+              <table class="data">
+                <thead><tr><th>编号</th><th>借出</th><th>归还</th><th>状态</th><th>扣款</th></tr></thead>
+                <tbody>
+                  <tr v-for="d in deviceRows" :key="d.code">
+                    <td class="mono small">{{ d.code }}</td>
+                    <td class="small mono">{{ d.lentAt?.slice(11, 16) }}</td>
+                    <td class="small mono">{{ d.returnedAt?.slice(11, 16) ?? '—' }}</td>
+                    <td class="small">
+                      <span class="tag" :class="{ 'tag-ok': d.status === 'returned', 'tag-maint': d.status === 'damaged' || d.status === 'lost' || d.status === 'repairing', 'tag-warn': d.status === 'lent' }">
+                        {{ DEVICE_STATUS_TEXT[d.status] }}
+                      </span>
+                      <div v-if="lossMap.get(d.code)" class="muted">
+                        借出人 {{ lossMap.get(d.code)!.borrower }} · 负责人 {{ lossMap.get(d.code)!.teamLeader }}
+                        · 最后使用 {{ museum.hallById(lossMap.get(d.code)!.lastHallId)?.name.replace(/^.*? · /, '') }}
+                      </div>
+                      <div v-else-if="d.note" class="muted">{{ d.note }}</div>
+                    </td>
+                    <td class="small money">{{ d.damageFee ? `¥${d.damageFee}` : '—' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <!-- 耳麦遗失押金处理档案 -->
+              <div v-if="r.lostDevices?.length" style="margin-top:10px">
+                <div class="small muted" style="margin-bottom:6px">耳麦遗失押金处理记录</div>
+                <div v-for="loss in r.lostDevices" :key="loss.id" class="callout"
+                     :class="loss.state === 'refunded' ? 'ok' : loss.state === 'paid' || loss.state === 'repaired' ? 'danger' : 'warn'"
+                     style="margin-bottom:8px">
+                  <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:4px">
+                    <strong class="mono">{{ loss.code }}</strong>
+                    <span class="small">
+                      {{ ({ searching: '现场寻找中', held: '押金暂扣中', paid: '已赔付结案', refunded: '找回无损·已退押金', repaired: '找回损坏·已扣维修费' })[loss.state] }}
                     </span>
-                    <div v-if="d.note" class="muted">{{ d.note }}</div>
-                  </td>
-                  <td class="small money">{{ d.damageFee ? `¥${d.damageFee}` : '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-            <dl class="kv" style="margin-top:10px">
-              <dt>押金合计</dt><dd class="money">¥{{ r.depositTotal.toLocaleString() }}</dd>
-              <dt>扣款</dt><dd class="money">¥{{ r.depositDeduction }}</dd>
-              <dt>实退</dt><dd class="money">¥{{ (r.depositTotal - r.depositDeduction).toLocaleString() }}</dd>
-            </dl>
+                  </div>
+                  <div class="small muted" style="margin-top:4px">
+                    借出人 {{ loss.borrower }} · 团队负责人 {{ loss.teamLeader }} ·
+                    最后使用 {{ museum.hallById(loss.lastHallId)?.name }} · 登记 {{ hmOfISO(loss.reportedAt) }}
+                  </div>
+                  <div class="small" style="margin-top:3px">{{ loss.note }}</div>
+                  <div v-if="loss.foundAt" class="small" style="margin-top:3px">
+                    找回：{{ hmOfISO(loss.foundAt) }} · {{ loss.foundBy }}<template v-if="loss.resolvedNote"> · {{ loss.resolvedNote }}</template>
+                  </div>
+                  <div class="small money" style="margin-top:3px">
+                    暂扣 ¥{{ loss.heldAmount }} → 最终扣款 ¥{{ loss.finalFee ?? '—' }}
+                  </div>
+                </div>
+              </div>
+
+              <dl class="kv" style="margin-top:10px">
+                <dt>押金合计<span v-if="r.depositRate > 1" class="muted">（{{ r.depositRate }}× 倍率）</span></dt>
+                <dd class="money">¥{{ r.depositTotal.toLocaleString() }}</dd>
+                <dt>累计扣款</dt><dd class="money">¥{{ r.depositDeduction }}</dd>
+                <dt>暂扣中</dt><dd class="money" :style="r.depositHeld ? 'color:var(--amber)' : ''">¥{{ r.depositHeld }}</dd>
+                <dt>已退还</dt><dd class="money" style="color:var(--green)">¥{{ r.depositRefunded }}</dd>
+              </dl>
+              <div v-if="depositEvents.length" style="margin-top:8px">
+                <div v-for="e in depositEvents" :key="e.id" class="small" style="padding:4px 0; border-bottom:1px dashed var(--line)">
+                  <span class="mono muted">{{ e.at.slice(11, 16) }}</span> {{ e.title }}
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { mount } from '@vue/test-utils'
@@ -27,8 +28,9 @@ function makeRouter() {
   })
 }
 
-function mountView(component: unknown) {
+function mountView(component: unknown, initialPath?: string) {
   const router = makeRouter()
+  if (initialPath) router.push(initialPath)
   return mount(component as never, {
     global: { plugins: [router] },
   })
@@ -92,6 +94,39 @@ describe('八大业务视图挂载冒烟', () => {
     expect(w.text()).toContain('逐台核对耳麦归还')
     expect(w.text()).toContain('押金结算')
     expect(w.text()).toContain('满意度')
+  })
+
+  it('离馆核销页标记遗失后出现借出人/负责人/最后展厅登记与三种处置方式', async () => {
+    const w = mountView(CheckoutView)
+    const lostBtn = w.findAll('button').find((b) => b.text().trim() === '遗 失')
+    expect(lostBtn).toBeTruthy()
+    await lostBtn!.trigger('click')
+    const text = w.text()
+    expect(text).toContain('现场寻找')
+    expect(text).toContain('押金暂扣')
+    expect(text).toContain('当场赔付')
+  })
+
+  it('离馆核销页为已离馆暂扣团渲染保洁找回与押金处理面板', async () => {
+    const w = mountView(CheckoutView)
+    const r6Item = w.findAll('.queue-item').find((d) => d.text().includes('鸿雁假期'))
+    expect(r6Item).toBeTruthy()
+    await r6Item!.trigger('click')
+    await nextTick()
+    const text = w.text()
+    expect(text).toContain('耳麦遗失后续处理')
+    expect(text).toContain('HS-041')
+    expect(text).toContain('团员陈晨')
+    expect(text).toContain('周领队')
+    expect(text).toContain('中庭')
+    expect(text).toContain('退还押金')
+    expect(text).toContain('维修费')
+  })
+
+  it('运营看板渲染遗失押金暂扣跟进面板', () => {
+    const w = mountView(OpsView)
+    expect(w.text()).toContain('耳麦遗失')
+    expect(w.text()).toContain('HS-041')
   })
 
   it('追溯页渲染晨光职校投诉档案证据链', () => {

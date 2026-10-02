@@ -238,6 +238,10 @@ export const HEADSET_TOTAL = 120
 export const HEADSET_DEPOSIT = 200 // 元/台
 export const DAMAGE_FEE = 50
 export const LOST_FEE = 200
+/** 保洁找回设备但已损坏时，从暂扣押金中扣除的维修费 */
+export const REPAIR_FEE = DAMAGE_FEE
+/** 有耳麦遗失记录的旅行社，后续预约押金上浮倍率 */
+export const ELEVATED_DEPOSIT_RATE = 1.5
 
 /** 大团规则 */
 export const MAX_GROUP_SIZE = 60

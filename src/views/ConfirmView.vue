@@ -148,6 +148,10 @@ const guideNeeded = computed(() => (r.value ? Math.ceil(r.value.groupSize / 25) 
           <div><div class="stat-label">无障碍 / 耳麦</div><div style="padding-top:5px">{{ r.accessible ? '♿ 需要' : '不需要' }} · {{ r.needHeadsets ? `${r.headsetCount} 台` : '不借用' }}</div></div>
         </div>
         <div v-if="r.note" class="section-tip" style="margin-top:12px; margin-bottom:0">联系人备注：{{ r.note }}</div>
+        <div v-if="r.depositRate > 1" class="callout warn" style="margin-top:12px; margin-bottom:0">
+          ⚠ 该旅行社有未结案或已扣款的耳麦遗失记录，本次耳麦押金按 <strong>{{ r.depositRate }} 倍（¥{{ Math.round(museum.depositPerUnit * r.depositRate) }}/台）</strong>收取，
+          预计 {{ r.headsetCount }} 台共 ¥{{ (Math.round(museum.depositPerUnit * r.depositRate) * r.headsetCount).toLocaleString() }}，确认须知中请向领队明示。
+        </div>
       </div>
 
       <!-- 容量与闭展 -->

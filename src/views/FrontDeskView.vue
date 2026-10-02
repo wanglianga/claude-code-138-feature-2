@@ -5,6 +5,7 @@ import { useMuseumStore } from '@/stores/museum'
 import { useReservationsStore } from '@/stores/reservations'
 import { useSessionStore } from '@/stores/session'
 import { hmOfISO, toMin } from '@/lib/time'
+import { depositPerUnit } from '@/lib/deposit'
 import StatusBadge from '@/components/StatusBadge.vue'
 
 const store = useReservationsStore()
@@ -52,6 +53,7 @@ function admit() {
 }
 
 const availableStock = computed(() => museum.inventory.available)
+const unitDeposit = computed(() => depositPerUnit(r.value?.depositRate ?? 1))
 </script>
 
 <template>
@@ -128,9 +130,9 @@ const availableStock = computed(() => museum.inventory.available)
           <div class="card-title">③ 发放耳麦</div>
           <template v-if="r.needHeadsets">
             <div class="field">
-              <label>发放数量（押金 ¥{{ museum.depositPerUnit }}/台）</label>
+              <label>发放数量（押金 ¥{{ unitDeposit }}/台<template v-if="r.depositRate > 1">，{{ r.depositRate }} 倍</template>）</label>
               <input v-model.number="headsetCount" type="number" :min="0" :max="r.verifiedSize ?? r.groupSize" />
-              <span class="hint">合计押金 <strong class="money">¥{{ (headsetCount * museum.depositPerUnit).toLocaleString() }}</strong></span>
+              <span class="hint">合计押金 <strong class="money">¥{{ (headsetCount * unitDeposit).toLocaleString() }}</strong></span>
             </div>
             <button class="btn-primary" style="width:100%; justify-content:center"
                     :disabled="r.verifiedSize === undefined || !!r.devices.length" @click="handout">

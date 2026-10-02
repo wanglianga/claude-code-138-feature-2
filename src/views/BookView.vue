@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useMuseumStore } from '@/stores/museum'
 import { useReservationsStore } from '@/stores/reservations'
 import { buildRoute } from '@/lib/schedule'
+import { depositPerUnit, orgLossSummary } from '@/lib/deposit'
 import {
   AGE_LABEL,
   GROUP_TYPE_LABEL,
@@ -40,6 +41,13 @@ const errors = reactive<Record<string, string>>({})
 const createdId = ref<string | null>(null)
 
 const theme = computed(() => museum.themeById(form.themeId))
+
+/** 按单位名称匹配历史耳麦遗失档案（旅行社信用影响押金倍率） */
+const orgSummary = computed(() => orgLossSummary(reservations.list, form.orgName.trim()))
+const previewRate = computed(() =>
+  form.orgType === 'travel' && orgSummary.value.hasCountedLoss ? 1.5 : 1,
+)
+const unitDeposit = computed(() => depositPerUnit(previewRate.value))
 const previewRoute = computed(() =>
   buildRoute(theme.value!, museum.halls, form.arriveTime, {
     accessible: form.accessible,
@@ -195,13 +203,21 @@ function goConfirm() {
       <div class="field">
         <label class="checkbox">
           <input v-model="form.needHeadsets" type="checkbox" />
-          🎧 借用团队讲解耳麦（押金 ¥{{ museum.depositPerUnit }}/台，离馆无损退还）
+          🎧 借用团队讲解耳麦（押金 ¥{{ unitDeposit }}/台，离馆无损退还）
         </label>
+        <div v-if="form.orgType === 'travel' && orgSummary.total" class="callout warn" style="margin-top:8px">
+          本旅行社在馆历史记录：耳麦遗失 <strong>{{ orgSummary.total }}</strong> 起
+          （未结 {{ orgSummary.outstanding }} · 已赔 {{ orgSummary.paid }} · 找回损坏 {{ orgSummary.repaired }}）。
+          <template v-if="orgSummary.hasCountedLoss">
+            <strong>本次预约押金按 1.5 倍收取（¥{{ museum.depositPerUnit }} → ¥{{ unitDeposit }}/台）</strong>，确认时将由前台向领队明示。
+          </template>
+          <template v-else>遗失设备均已完好找回，押金维持 ¥{{ museum.depositPerUnit }}/台。</template>
+        </div>
       </div>
       <div v-if="form.needHeadsets" class="field" style="max-width: 220px">
         <label>借用数量</label>
         <input v-model.number="form.headsetCount" type="number" min="1" :max="form.groupSize" />
-        <span class="hint">预计押金 ¥{{ (form.headsetCount * museum.depositPerUnit).toLocaleString() }}</span>
+        <span class="hint">预计押金 <strong class="money">¥{{ (form.headsetCount * unitDeposit).toLocaleString() }}</strong><template v-if="previewRate > 1">（1.5 倍）</template></span>
         <span v-if="errors.headsetCount" class="field-error">{{ errors.headsetCount }}</span>
       </div>
 

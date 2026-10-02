@@ -73,6 +73,10 @@ export type EventKind =
   | 'late'
   | 'child_lost'
   | 'device_broken'
+  | 'device_lost_report'
+  | 'deposit_held'
+  | 'device_found'
+  | 'deposit_refund'
   | 'reroute'
   | 'maintenance'
   | 'wait'
@@ -92,7 +96,7 @@ export interface TimelineEvent {
   by: string // 操作人/系统
 }
 
-export type DeviceStatus = 'available' | 'lent' | 'returned' | 'damaged' | 'lost'
+export type DeviceStatus = 'available' | 'lent' | 'returned' | 'damaged' | 'lost' | 'repairing'
 
 export const DEVICE_STATUS_LABEL: Record<DeviceStatus, string> = {
   available: '在库',
@@ -100,6 +104,51 @@ export const DEVICE_STATUS_LABEL: Record<DeviceStatus, string> = {
   returned: '已归还',
   damaged: '损坏',
   lost: '遗失',
+  repairing: '送修',
+}
+
+/** 离馆遗失处置方式 */
+export type LossDisposition = 'search' | 'hold' | 'paid'
+export const LOSS_DISPOSITION_LABEL: Record<LossDisposition, string> = {
+  search: '现场寻找',
+  hold: '押金暂扣',
+  paid: '当场赔付',
+}
+
+/** 遗失记录的处理状态 */
+export type LossState = 'searching' | 'held' | 'paid' | 'refunded' | 'repaired'
+export const LOSS_STATE_LABEL: Record<LossState, string> = {
+  searching: '现场寻找中',
+  held: '押金暂扣中',
+  paid: '已赔付结案',
+  refunded: '找回无损·押金退还',
+  repaired: '找回损坏·扣除维修费',
+}
+
+/** 耳麦遗失档案：随预约永久留痕，并计入该旅行社后续押金等级 */
+export interface LostDeviceRecord {
+  id: string
+  code: string
+  /** 实际使用/借出该耳麦的团员或工作人员 */
+  borrower: string
+  /** 团队负责人（老师 / 领队） */
+  teamLeader: string
+  /** 最后使用展厅 */
+  lastHallId: string
+  reportedAt: string
+  note: string
+  disposition: LossDisposition
+  state: LossState
+  /** 暂扣金额（= 该台押金，按收押金倍率计） */
+  heldAmount: number
+  /** 最终扣款（赔付 ¥200 或维修费 ¥50） */
+  finalFee?: number
+  /** 保洁/工作人员找回时间 */
+  foundAt?: string
+  /** 找回时设备情况 */
+  foundCondition?: 'ok' | 'damaged'
+  foundBy?: string
+  resolvedNote?: string
 }
 
 export interface DeviceUnit {
@@ -111,6 +160,8 @@ export interface DeviceUnit {
   returnedAt?: string
   damageFee?: number // 损坏/遗失扣款
   note?: string
+  /** 遗失挂账预约（lost 状态下保留，用于后续找回核销） */
+  lostResId?: string
 }
 
 export interface Reservation {
@@ -151,7 +202,16 @@ export interface Reservation {
   // —— 设备与押金 ——
   devices: DeviceUnit[]
   depositTotal: number
+  /** 已确定扣款（损坏 ¥50 / 遗失赔付 ¥200 / 找回损坏维修费 ¥50） */
   depositDeduction: number
+  /** 押金暂扣总额（遗失待保洁核查，尚未退还也未扣除） */
+  depositHeld: number
+  /** 已退还押金总额（含暂扣后核查退还） */
+  depositRefunded: number
+  /** 收押金倍率：有遗失记录的旅行社后续按 1.5 倍收取 */
+  depositRate: number
+  /** 耳麦遗失档案（影响该旅行社后续押金等级） */
+  lostDevices: LostDeviceRecord[]
 
   // —— 离馆 ——
   departAt?: string

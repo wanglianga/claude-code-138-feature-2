@@ -55,7 +55,14 @@ const rerouteEvents = computed(() =>
   todayList.value.reduce((n, r) => n + r.timeline.filter((e) => e.kind === 'reroute' || e.kind === 'maintenance').length, 0),
 )
 const damagedDevices = computed(() =>
-  museum.headsets.filter((d) => d.status === 'damaged' || d.status === 'lost').length,
+  museum.headsets.filter((d) => d.status === 'damaged' || d.status === 'lost' || d.status === 'repairing').length,
+)
+const repairingDevices = computed(() => museum.headsets.filter((d) => d.status === 'repairing').length)
+/** 全馆未结案的耳麦遗失（现场寻找中 / 押金暂扣中），需保洁跟进 */
+const outstandingLosses = computed(() => store.outstandingLosses)
+/** 因遗失记录而适用上浮押金的当日预约 */
+const elevatedDepositRes = computed(() =>
+  todayList.value.filter((r) => r.depositRate > 1),
 )
 const largeGroups = computed(() => todayList.value.filter((r) => r.groupSize >= 35))
 const overCapHalls = computed(() => hallRows.value.filter((x) => x.ratio >= 0.85))
@@ -75,6 +82,10 @@ const suggestions = computed(() => {
     out.push({ level: 'danger', text: `今日有 ${complaints.value.length} 起投诉：热门展厅高峰时段应增配 1 名讲解员或延长单厅讲解时长，避免「讲解缩水」。` })
   if (damagedDevices.value / Math.max(museum.headsets.length, 1) > 0.03)
     out.push({ level: 'warn', text: `耳麦损坏/遗失 ${damagedDevices.value} 台，建议高峰前增加设备点检，并在儿童团发放时加套防摔绳。` })
+  if (outstandingLosses.value.length)
+    out.push({ level: 'danger', text: `${outstandingLosses.value.length} 台耳麦遗失押金暂扣/寻找中（${outstandingLosses.value.map((x) => x.loss.code).join('、')}）：请立即把最后使用展厅（${[...new Set(outstandingLosses.value.map((x) => museum.hallById(x.loss.lastHallId)?.name.replace(/^.*? · /, '')))].join('、')}）加入保洁巡查清单，闭馆前按找回情况退押金或扣维修费。` })
+  if (elevatedDepositRes.value.length)
+    out.push({ level: 'warn', text: `旅行社「${[...new Set(elevatedDepositRes.value.map((r) => r.orgName))].join('、')}」有耳麦遗失记录，其 ${elevatedDepositRes.value.length} 个后续预约已按 1.5 倍（¥300/台）预收押金，确认时须向领队明示。` })
   if (!out.length) out.push({ level: 'ok', text: '当前各展厅负载、排班与设备状态平稳，维持现有大团与限流规则。' })
   return out
 })
@@ -87,7 +98,11 @@ const suggestions = computed(() => {
       <div class="small muted">待确认 {{ store.byStatus('submitted').length }} · 在馆 {{ inHall }} 人</div></div>
     <div class="card tight"><div class="stat-label">耳麦借出 / 库存</div>
       <div class="stat-num">{{ museum.inventory.lent }}<span style="font-size:15px"> / {{ museum.headsets.length }}</span></div>
-      <CapacityBar :load="museum.inventory.lent" :capacity="museum.headsets.length" compact /></div>
+      <CapacityBar :load="museum.inventory.lent" :capacity="museum.headsets.length" compact />
+      <div class="small muted">
+        损坏 {{ museum.inventory.damaged }} · 送修 {{ repairingDevices }} · 遗失 {{ museum.inventory.lost }}
+        <span v-if="outstandingLosses.length" style="color:var(--amber)">· 押金暂扣 {{ outstandingLosses.length }} 台</span>
+      </div></div>
     <div class="card tight"><div class="stat-label">离馆团满意度均值</div><div class="stat-num stars" style="font-size:23px">{{ avgSat }}</div>
       <div class="small muted">投诉 {{ complaints.length }} 起</div></div>
     <div class="card tight"><div class="stat-label">拥堵 / 改道事件</div>
@@ -141,6 +156,32 @@ const suggestions = computed(() => {
     </div>
   </div>
 
+  <!-- 遗失押金挂账跟进 -->
+  <div v-if="outstandingLosses.length" class="card" style="margin-bottom:14px; border-color:var(--amber)">
+    <div class="card-title">
+      耳麦遗失 · 押金暂扣跟进
+      <span class="aside">保洁找回后按设备状态退押金或扣维修费；损坏/遗失设备不会再分配给下一场团队</span>
+    </div>
+    <table class="data">
+      <thead><tr><th>设备编号</th><th>旅行社 / 团队</th><th>借出人</th><th>负责人</th><th>最后使用展厅</th><th>登记时间</th><th>暂扣押金</th><th>状态</th><th></th></tr></thead>
+      <tbody>
+        <tr v-for="x in outstandingLosses" :key="x.loss.id">
+          <td class="mono"><strong>{{ x.loss.code }}</strong></td>
+          <td class="small">{{ x.res.orgName }}<div class="muted mono">{{ x.res.id }}</div></td>
+          <td class="small">{{ x.loss.borrower }}</td>
+          <td class="small">{{ x.loss.teamLeader }}</td>
+          <td class="small">{{ museum.hallById(x.loss.lastHallId)?.name }}</td>
+          <td class="small mono">{{ hmOfISO(x.loss.reportedAt) }}</td>
+          <td class="small money">¥{{ x.loss.heldAmount }}</td>
+          <td><span class="tag" :class="x.loss.state === 'held' ? 'tag-warn' : 'tag-maint'">
+            {{ x.loss.state === 'held' ? '押金暂扣中' : '现场寻找中' }}
+          </span></td>
+          <td><RouterLink class="btn-sm btn-gold" :to="`/checkout/${x.res.id}`">去处理</RouterLink></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <!-- 优化建议 + 今日团队流 -->
   <div class="grid grid-2" style="align-items:start">
     <div class="card">
@@ -153,7 +194,8 @@ const suggestions = computed(() => {
         <dt>大团阈值</dt><dd>≥ 35 人自动提示拆批，单批 ≤ 25 人，批间隔 ≥ 5 分钟</dd>
         <dt>限流规则</dt><dd>展厅在场人数达容量 85% 预警、100% 启动分流改道</dd>
         <dt>预约规则</dt><dd>大团与外语讲解建议提前 3 个工作日预约</dd>
-        <dt>押金规则</dt><dd>耳麦 ¥{{ museum.depositPerUnit }}/台；损坏赔 ¥50、遗失赔 ¥200</dd>
+        <dt>押金规则</dt>
+        <dd>耳麦 ¥{{ museum.depositPerUnit }}/台；损坏赔 ¥50、遗失赔 ¥200；遗失可先暂扣押金，保洁找回完好则退还、找回损坏扣维修费 ¥50。<strong>有遗失记录的旅行社后续预约押金上浮至 1.5 倍（¥300/台）。</strong></dd>
       </dl>
     </div>
 
